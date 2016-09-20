@@ -1,0 +1,32 @@
+# General
+*~
+*.log
+tmp
+dump
+.DS_Store
+db/*
+neo4j.graphdb
+
+
+# Eclipse
+.settings
+.cache*
+.project
+.classpath
+.scala_dependencies
+.metadata
+bin
+
+# SBT
+dist
+project/boot
+project/target
+project/plugins/target
+target
+.target
+.recommenders
+
+# Play
+logs
+RUNNING_PID
+
