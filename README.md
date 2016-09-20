@@ -1,49 +1,34 @@
-This is your new Play application
-=================================
+== EP - Graph visualization of indexed documents
 
-This file will be packaged with your application when using `activator dist`.
+=== Installation
 
-There are several demonstration files available in this template.
+- Install Play! Framework: 
 
-Controllers
-===========
+  Download and install Play! Framework: https://www.playframework.com
 
-- HomeController.java:
+- Install Neo4j graph database:
 
-  Shows how to handle simple HTTP requests.
+  Download and install Neo4j server: https://neo4j.com
+ 
+=== Compile
 
-- AsyncController.java:
+- Compile using Play! activator:
 
-  Shows how to do asynchronous programming when handling a request.
+  Enter into project directory, initialize activator and compile:
+  [source]
+    cd ep
+    activator
+    compile
+  [/source]
+  It will download all dependencies and compile the application.
+   
+=== Run application
 
-- CountController.java:
+- Launch application using activator:
+   
+  [source]
+  cd ep
+  activator
+  run
 
-  Shows how to inject a component into a controller and use the component when
-  handling requests.
-
-Components
-==========
-
-- Module.java:
-
-  Shows how to use Guice to bind all the components needed by your application.
-
-- Counter.java:
-
-  An example of a component that contains state, in this case a simple counter.
-
-- ApplicationTimer.java:
-
-  An example of a component that starts when the application starts and stops
-  when the application stops.
-
-Filters
-=======
-
-- Filters.java:
-
-  Creates the list of HTTP filters used by your application.
-
-- ExampleFilter.java
-
-  A simple filter that adds a header to every response.
+- Application will start, usaully at http://localhost:9000
