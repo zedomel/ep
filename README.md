@@ -1,34 +1,36 @@
-== EP - Graph visualization of indexed documents
+# EP - Graph visualization and documents indexing
+### Installation
+* Install Play! Framework:
+    * Download and install Play! Framework: [play]
+* Install Neo4j graph database:
+    * Download and install Neo4j server: [neo4j]
+### Compile
+* Compile using Play! activator:
+    * Enter into project directory, initialize activator and compile:
+    ```sh 
+       $ cd ep 
+       $ activator 
+       [ep] $ compile
+    ```
+    It will download all dependencies and compile the application.
+### Run application
 
-=== Installation
+* Launch application using activator:
+```sh
+    $ cd ep
+    $ activator
+    [ep] $ run
+```
+Application will start, usaully at http://localhost:9000
 
-- Install Play! Framework: 
 
-  Download and install Play! Framework: https://www.playframework.com
 
-- Install Neo4j graph database:
 
-  Download and install Neo4j server: https://neo4j.com
- 
-=== Compile
+**Free Software**
 
-- Compile using Play! activator:
+[//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
 
-  Enter into project directory, initialize activator and compile:
-  [source]
-    cd ep
-    activator
-    compile
-  [/source]
-  It will download all dependencies and compile the application.
-   
-=== Run application
+   [play]: <https://www.playframework.com>
+   [neo4j]: <https://neo4j.com>
+  
 
-- Launch application using activator:
-   
-  [source]
-  cd ep
-  activator
-  run
-
-- Application will start, usaully at http://localhost:9000
