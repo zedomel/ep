@@ -4,6 +4,7 @@
     * Download and install Play! Framework: [play]
 * Install Neo4j graph database:
     * Download and install Neo4j server: [neo4j]
+
 ### Compile
 * Compile using Play! activator:
     * Enter into project directory, initialize activator and compile:
@@ -13,8 +14,8 @@
        [ep] $ compile
     ```
     It will download all dependencies and compile the application.
-### Run application
 
+### Run application
 * Launch application using activator:
 ```sh
     $ cd ep
