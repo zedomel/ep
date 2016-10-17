@@ -8,6 +8,8 @@ GET     	/                           controllers.HomeController.index
 
 GET			/search							controllers.HomeController.search(term : String)
 
+GET			/add_document				controllers.HomeController.addDocument(directory : String)
+
 GET     	/javascriptRoutes      		controllers.HomeController.javascriptRoutes
 
 # Map static resources from the /public folder to the /assets URL path
