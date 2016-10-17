@@ -453,6 +453,12 @@ public class PapersIndexer {
 	}
 
 	public static void main(String[] args) throws Exception {
+
+		if ( args.length != 1){
+			System.out.println("Provide the directory path where articles are located");
+			return;
+		}
+
 		try {
 			BufferedReader br = new BufferedReader( new FileReader("conf/application.conf"));
 			StringBuilder sb = new StringBuilder();
@@ -466,7 +472,7 @@ public class PapersIndexer {
 			Configuration configuration = new Configuration(sb.toString());
 			PapersIndexer indexer = new PapersIndexer(configuration, 
 					new PapersIndexSearcher(configuration));
-			indexer.addDocuments("/Users/jose/Documents/freelancer/petricaep/artigos/");
+			indexer.addDocuments(args[0]);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
