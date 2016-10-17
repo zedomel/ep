@@ -65,6 +65,17 @@ public class HomeController extends Controller {
 		}
     	return ok(Json.toJson(docs)).as("application/json");
     }
+    
+    
+    public Result addDocument(String directory){
+    	try {
+			indexer.addDocuments(directory);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+    	return ok(index.render());
+    }
 
     /**
      * Create javascript routes for this controller
