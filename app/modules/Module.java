@@ -32,9 +32,11 @@ public class Module extends AbstractModule {
 			Class<? extends DocumentParser> bindingClass =
 					environment.classLoader().loadClass(bindingClassName)
 					.asSubclass(DocumentParser.class);
+			
 			bind(DocumentParser.class)
 			.annotatedWith(Names.named("documentParser"))
 			.to(bindingClass);
+			System.out.println(bindingClass.getName());
 			
 			if (bindingClass.equals(GrobIDDocumentParser.class))
 				initializeGROBID();
@@ -49,6 +51,7 @@ public class Module extends AbstractModule {
 		String grobidProperties = configuration.getString("grobid.properties", "grobid-home/config/grobid.properties");
 		
 		try {
+			MockContext.destroyInitialContext();
 			MockContext.setInitialContext(grobidHome, grobidProperties);
 		} catch (Exception e) {
 			throw e;
