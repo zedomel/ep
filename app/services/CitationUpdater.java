@@ -39,7 +39,8 @@ public class CitationUpdater {
 				 
 				 Document doc = ireader.document(i);
 				 String citString = doc.get("citString");
-				 processCitation(doc, citString);
+				 String citDOI = doc.get("citDOI");
+				 processCitation(doc, citDOI, citString);
 			 }
 		} catch (IOException e) {
 			logger.error("Can't create index searcher object", e);
@@ -53,13 +54,13 @@ public class CitationUpdater {
 
 
 
-	private void processCitation(Document doc, String citString) 
+	private void processCitation(Document doc, String citDOI, String citString) 
 	{
 		String[] citations = citString.split("\\$");	
 		for(int i = 0; i < citations.length; i++){
 			String[] fields = citations[i].split("\t");
 			try {
-				DatabaseHelper.createCitaton(doc, fields[0], fields[1]);
+				DatabaseHelper.createCitaton(doc, citDOI, fields[0], fields[1], fields[2]);
 			} catch (Exception e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();

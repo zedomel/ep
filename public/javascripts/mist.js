@@ -6,11 +6,21 @@ $(document).ready(function() {
 });
 
 successFn = function(data){
-	var container = $("#results");
-	container.empty();
-	for(i = 0; i< data.length; i++){
-		var score = data[i].score.toFixed(3);
-		container.append('<p><b>Score: ' + score + '</b> Title: ' + data[i].title + ' Authors: ' + data[i].authors + '</p>');
+	var viz = d3.select('#visualization'),
+		width = +viz.attr('width');
+	
+	
+	for(i = 0; i< data.clusters.length; i++){
+		var clId = data.clusters[i].id;
+		var clSize = data.clusters[i].size;
+		container.append('<h1>Cluster: ' + clId + ' Size: ' + clSize + '</h1>');
+		for (j = 0; j < data.clusters[i].documents.length; j++){
+			var docId = parseInt(data.clusters[i].documents[j]);
+			var doc = data.documents[docId];			
+			var score = doc.fields.relevance;
+			var authors = doc.fields.authors;
+			container.append('<p><b>Score: ' + score + '</b> Title: ' + doc.title + ' Authors: ' + authors + '</p>');
+		}
 	}
 }
 

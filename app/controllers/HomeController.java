@@ -4,9 +4,7 @@ import java.io.IOException;
 
 import javax.inject.Inject;
 
-import model.ResultDocument;
 import play.data.FormFactory;
-import play.libs.Json;
 import play.mvc.Controller;
 import play.mvc.Result;
 import play.routing.JavaScriptReverseRouter;
@@ -55,15 +53,15 @@ public class HomeController extends Controller {
      * @return Play result as Json
      */
     public Result search(String term){
-    	ResultDocument[] docs;
+    	String jsonResult;
 		try {
-			docs = isearch.search(term, false);
+			jsonResult = isearch.search(term, false);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 			return internalServerError("Can't search for documents");
 		}
-    	return ok(Json.toJson(docs)).as("application/json");
+    	return ok(jsonResult).as("application/json");
     }
     
     

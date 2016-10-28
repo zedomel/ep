@@ -39,8 +39,8 @@ public class CitationSimilarity extends Similarity{
 	}
 
 	@Override
-	public SimWeight computeWeight(CollectionStatistics collectionStats, TermStatistics... termStats) {
-		return sim.computeWeight(collectionStats, termStats);
+	public SimWeight computeWeight(float queryBoost, CollectionStatistics collectionStats, TermStatistics... termStats) {
+		return sim.computeWeight(queryBoost, collectionStats, termStats);
 	}
 
 	/**

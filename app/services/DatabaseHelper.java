@@ -1,24 +1,16 @@
 package services;
 
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Map;
-import java.util.Properties;
 
 import org.apache.lucene.document.Document;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.typesafe.config.Config;
-import com.typesafe.config.ConfigException;
 import com.typesafe.config.ConfigFactory;
-
-import play.Configuration;
 
 /**
  * Database helper methods to retrieve and store data.
@@ -27,10 +19,6 @@ import play.Configuration;
  *
  */
 public final class DatabaseHelper {
-
-	private static final String CONFIG_FILE = "conf/database.properties";
-	
-	private Logger logger = LoggerFactory.getLogger(DatabaseHelper.class);
 
 	/**
 	 * Neo4j connection URL
@@ -46,7 +34,7 @@ public final class DatabaseHelper {
 	 * Neo4j password
 	 */
 	private final String neo4jPassword;
-	
+
 	private static final DatabaseHelper INSTANCE = new DatabaseHelper();
 
 	/**
@@ -55,14 +43,14 @@ public final class DatabaseHelper {
 	 */
 	private DatabaseHelper() {
 		super();
-		
+
 		Config config = ConfigFactory.load();
 		neo4jUrl = config.getString("neo4j.url");
 		neo4jUser = config.getString("neo4j.username");
 		neo4jPassword = config.getString("neo4j.password");
 	}
-	
-	
+
+
 	public static DatabaseHelper getInstance(){
 		return INSTANCE;
 	}
@@ -88,8 +76,18 @@ public final class DatabaseHelper {
 	 * @throws Exception if any error occurs when creating
 	 * the new node.
 	 */
-	public static long addNode(String title, String authors, String file) throws Exception {
+	public static long addNode(String doi, String title, String authors, String year, String file) throws Exception {
 
+		if (doi == null && (title == null && authors == null && year == null)){
+			throw new Exception("Can't add empty node");
+		}
+		
+		//Clean values
+		doi = doi == null ? "" : doi;
+		title = title == null ? "" : title;
+		authors = authors == null ? "" :  authors;
+		year = year == null ?  "" : year;
+		
 		try (Connection con = getConnection()){
 			con.setAutoCommit(false);
 
@@ -101,16 +99,18 @@ public final class DatabaseHelper {
 			// from that only in the graph (not already inserted).
 			String queryString;
 			if (file != null)
-				queryString = "MERGE (n:DOCUMENT {title: {1}, authors: {2}, file: {3}}) RETURN n";
+				queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}, file: {5}}) RETURN n";
 			else
-				queryString = "MERGE (n:DOCUMENT {title: {1}, authors: {2}}) RETURN n";
+				queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}}) RETURN n";
 
 			try (PreparedStatement stmt = con.prepareStatement(queryString)){
-				stmt.setString(1, title);
-				stmt.setString(2, authors);
+				stmt.setString(1, doi);
+				stmt.setString(2, title);
+				stmt.setString(3, authors);
+				stmt.setString(4, year);
 				if (file != null)
-					stmt.setString(3, file);
-				
+					stmt.setString(5, file);
+
 				// Get the new node object and return its internal id
 				ResultSet rs = stmt.executeQuery();
 				if (rs.next()){
@@ -146,20 +146,52 @@ public final class DatabaseHelper {
 	 * @return the id of cited node.
 	 * @throws Exception if any error occurs when creating the new edge.
 	 */
-	public static long createCitaton(Document doc, String title, String authors) throws Exception {
-		
+	public static long createCitaton(Document doc, String doi, String title, String authors, String year) throws Exception {
+
 		// Creates a new node for cited document if needed
-		addNode(title, authors, null);
-		
+		addNode(doi, title, authors, year, null);
+
 		try (Connection con = getConnection()){
 			con.setAutoCommit(false);
 			//Directional edge from n->m return m (cited node)
-			String queryString = "MATCH (n:DOCUMENT {title: {1}}), "
-					+ "(m:DOCUMENT {title: {2}}) MERGE (n)-[r:CITES]->(m) RETURN m";
+			String queryString = null;
+			
+			String param1 = doc.get("doi");
+			String param2 = null;
+			if (param1 != null && !param1.isEmpty()){
+				if (doi != null && !doi.isEmpty()){
+					queryString = "MATCH (n:DOCUMENT {doi: {1}}), "
+							+ "(m:DOCUMENT {doi: {2}}) MERGE (n)-[r:CITES]->(m) RETURN m";
+					param2 = doi;
+				}
+				else if (title != null && !title.isEmpty()){
+					queryString = "MATCH (n:DOCUMENT {doi: {1}}), "
+							+ "(m:DOCUMENT {title: {2}}) MERGE (n)-[r:CITES]->(m) RETURN m";
+					param2 = title;
+				}
+			}
+			else{
+				param1 = doc.get("title");
+				if (param1 != null && !param1.isEmpty()){
+					if (doi != null && !doi.isEmpty()){
+						queryString = "MATCH (n:DOCUMENT {title: {1}}), "
+								+ "(m:DOCUMENT {doi: {2}}) MERGE (n)-[r:CITES]->(m) RETURN m";
+						param2 = doi;
+					}
+					else if (title != null && !title.isEmpty()){
+						queryString = "MATCH (n:DOCUMENT {title: {1}}), "
+								+ "(m:DOCUMENT {title: {2}}) MERGE (n)-[r:CITES]->(m) RETURN m";
+						param2 = title;
+					}
+				}
+			}
 
+			if (queryString == null)
+				throw new Exception("Document has no DOI or title. Can't create citation!");
+			
 			try (PreparedStatement stmt = con.prepareStatement(queryString)){
-				stmt.setString(1, doc.get("title"));
-				stmt.setString(2, title);
+				stmt.setString(1, param1);
+				stmt.setString(2, param2);
 				ResultSet rs = stmt.executeQuery();
 
 				if (rs.next()){
@@ -172,7 +204,7 @@ public final class DatabaseHelper {
 						return ((Long) id).longValue();
 					}
 				}
-			
+
 				//Should never happen!
 				throw new Exception("Should neve happen! Query does not return expected value for cited node"); 
 			}catch (Exception e) {
@@ -203,26 +235,36 @@ public final class DatabaseHelper {
 
 		try (Connection con = getConnection()){
 			con.setAutoCommit(false);
-			String queryString = "MATCH (n:DOCUMENT {title: {1}})<-[r:CITES]-() RETURN count(r) as total";
-
-			try (PreparedStatement stmt = con.prepareStatement(queryString)){
-				stmt.setString(1, doc.get("title"));
-				ResultSet rs = stmt.executeQuery();
-				if (rs.next()){
-					con.commit();
-					return rs.getLong("total");
+			String value = doc.get("citDOI");
+			String queryString = null;
+			if (value != null && !value.isEmpty())
+				queryString = "MATCH (n:DOCUMENT {doi: {1}})<-[r:CITES]-() RETURN count(r) as total";
+			else{
+				value = doc.get("title");
+				if (value != null && !value.isEmpty())
+					queryString = "MATCH (n:DOCUMENT {title: {1}})<-[r:CITES]-() RETURN count(r) as total";
+			}
+			if (queryString != null){
+				try (PreparedStatement stmt = con.prepareStatement(queryString)){
+					stmt.setString(1, value);
+					ResultSet rs = stmt.executeQuery();
+					if (rs.next()){
+						con.commit();
+						return rs.getLong("total");
+					}
+					con.rollback();
+					return -1;
+				}catch (Exception e) {
+					con.rollback();
+					throw e;
 				}
-				con.rollback();
-				return -1;
-			}catch (Exception e) {
-				con.rollback();
-				throw e;
 			}
 		}catch (Exception e) {
 			throw e;
 		}
+		return 0;
 	}
-	
+
 	/**
 	 * Delete a node from database with given internal id.
 	 * @param id the id of the node to delete.

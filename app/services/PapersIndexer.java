@@ -36,14 +36,17 @@ import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
 import org.apache.tika.sax.BodyContentHandler;
-import org.grobid.core.data.BibDataSet;
-import org.grobid.core.data.BiblioItem;
+import org.grobid.core.mock.MockContext;
+import org.grobid.core.utilities.GrobidProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
+import com.google.inject.name.Named;
+
 import play.Configuration;
+import services.parsers.GrobIDDocumentParser;
 
 /**
  * Main class for indexing documents (papers) 
@@ -53,6 +56,8 @@ import play.Configuration;
  */
 @Singleton
 public class PapersIndexer {
+
+	private static final String NULL_DOI = "NULL";
 
 	private Logger logger = LoggerFactory.getLogger(PapersIndexer.class);
 
@@ -68,7 +73,13 @@ public class PapersIndexer {
 	 */
 	private final PapersIndexSearcher papersIndexSearcher;
 
-	
+	/**
+	 * Document Parser: GROBID or Cermine
+	 */
+	@Named("documentParser")
+	private DocumentParser documentParser;
+
+
 
 	/**
 	 * Creates a document indexer to index documents from 
@@ -77,10 +88,11 @@ public class PapersIndexer {
 	 * @throws IOException if an error occurs while initializing index
 	 */
 	@Inject
-	public PapersIndexer(Configuration configuration, PapersIndexSearcher isearcher) throws IOException {
+	public PapersIndexer(Configuration configuration, PapersIndexSearcher isearcher, 
+			DocumentParser documentParser) throws IOException {
 		this.indexDir = configuration.getString("luceneIndexDir", "db");
 		this.papersIndexSearcher = isearcher;
-		
+		this.documentParser = documentParser;
 	}
 
 	/**
@@ -138,7 +150,8 @@ public class PapersIndexer {
 						doc.add(citCount);
 
 						// Adds node to Neo4j database and get its internal id
-						long nodeId = DatabaseHelper.addNode(doc.get("title"), doc.get("authors"), doc.get("file"));
+						long nodeId = DatabaseHelper.addNode(doc.get("doi"), doc.get("title"), doc.get("authors"), 
+								doc.get("year"), doc.get("file"));
 						// Adds the Neo4j node's id to the index, so we can retrieve it from 
 						// index when searching and easy recover it from Neo4j.
 						doc.add(new StringField("id", ""+nodeId, Store.YES));
@@ -179,7 +192,7 @@ public class PapersIndexer {
 			}
 			// Release IndexSearcher to be used by another thread
 			papersIndexSearcher.getSearcherManager().release(isearch);
-			
+
 			// Now commits updates
 			writer.commit();
 			writer.deleteUnusedFiles();
@@ -210,7 +223,8 @@ public class PapersIndexer {
 				doc.add(citCount);
 
 				// Adds node to Neo4j graph
-				long nodeId = DatabaseHelper.addNode(doc.get("title"), doc.get("authors"), doc.get("file"));
+				long nodeId = DatabaseHelper.addNode(doc.get("doi"), doc.get("title"), doc.get("authors"),
+						doc.get("year"), doc.get("file"));
 				// And the Neo4j id as a document's field
 				doc.add(new StringField("id", ""+nodeId, Store.YES));
 
@@ -264,11 +278,11 @@ public class PapersIndexer {
 				writer.commit();
 				writer.deleteUnusedFiles();
 			}
-			
+
 			// Release and refresh IndexSeacher to make changes searchable
 			papersIndexSearcher.getSearcherManager().release(isearch);
 			papersIndexSearcher.getSearcherManager().maybeRefresh();
-			
+
 		}catch(Exception e){
 			throw e;
 		}
@@ -291,19 +305,25 @@ public class PapersIndexer {
 		}
 
 		// Get citation string extracted from document
-		String citString = doc.get("citString");
-		if (citString == null || citString.isEmpty())
+		String[] citStrings = doc.getValues("citString");
+		String[] citDOIs= doc.getValues("citDOI");
+		
+		if (citStrings == null || citStrings.length == 0)
 			return;
 
-		// Split citations by citation separator '$'
-		String[] citations = citString.split("\\$");
 		// Iterate over all citation text 
-		for(int i = 0; i < citations.length; i++){
-			String[] fields = citations[i].split("\t");
+		for(int i = 0; i < citStrings.length; i++){
+			String[] fields = citStrings[i].split("\t");
+			String doi = citDOIs[i];
 			try {
 
 				// Create citation (edge on Neo4j graph) if not exist
-				long citedNodeId = DatabaseHelper.createCitaton(doc, fields[0], fields[1]);
+				if (NULL_DOI.equals(doi))
+					doi = null;
+				String year = null;
+				if (fields.length == 3)
+					year = fields[2];
+				long citedNodeId = DatabaseHelper.createCitaton(doc, doi, fields[0], fields[1], year);
 
 				idTerm = new Term("id", ""+citedNodeId);
 				TermQuery query = new TermQuery(idTerm);
@@ -325,7 +345,7 @@ public class PapersIndexer {
 								new NumericDocValuesField("citCount", citationsCount));
 				}
 			} catch (Exception e) {
-				logger.error("Error updating citation for document: "+doc.get("file") + " citString: "+citations[i], e);
+				logger.error("Error updating citation for document: "+doc.get("file") + " citString: "+citStrings[i], e);
 			}
 		}
 	}
@@ -363,7 +383,7 @@ public class PapersIndexer {
 		try {
 			// Process document using GROBID: 
 			// extracts header and references information
-			processWithGrobID(filename.getAbsolutePath(), doc);
+			parseDocument(filename.getAbsolutePath(), doc);
 		} catch (Exception e) {
 			logger.error("Error extracting document's information with GROBID", e);
 			return null;
@@ -382,63 +402,60 @@ public class PapersIndexer {
 	 * @param doc the {@link Document} object to add extracted terms
 	 * @throws Exception if any error occurs extracting data.
 	 */
-	private void processWithGrobID(String filename, Document doc) throws Exception {
-		GrobIDParser grobIDParser =  GrobIDParser.getInstance();
-		
-		// Parse document header
-		BiblioItem bibItem = grobIDParser.parseHeader(filename);
+	private void parseDocument(String filename, Document doc) throws Exception {
+
+		// Parse document
+		documentParser.parse(filename);
 
 		// If document has not title or authors it can't be add to 
 		// the index: is it really a scientific publication?
 		// TODO: remove authors from mandatory fields
-		if (bibItem.getTitle() == null || bibItem.getFullAuthors() == null )
+		if (documentParser.getTitle() == null || documentParser.getAuthors() == null )
 			throw new Exception("Document has no title or authors");
 
 		// Mandatory fields: title and authors
-		doc.add(new StringField("title", bibItem.getTitle().toLowerCase(), Store.YES));
+		doc.add(new StringField("title", documentParser.getTitle().toLowerCase(), Store.YES));
 
 		//TODO: check for existence
-		doc.add(new StringField("authors", normalizeAuthors(bibItem.getAuthors()), Store.YES));
+		doc.add(new StringField("authors", normalizeAuthors(documentParser.getAuthors()), Store.YES));
 
 		// Some other useful informations
-		if (bibItem.getAddress() != null )
-			doc.add(new StringField("address", bibItem.getAddress().toLowerCase(), Store.YES));
-		if ( bibItem.getAffiliation() != null )
-			doc.add(new StringField("affiliation", bibItem.getAffiliation().toLowerCase(), Store.YES));
-		if ( bibItem.getDOI() != null )
-			doc.add(new StringField("DOI", bibItem.getDOI(), Store.YES));
-		if ( bibItem.getPublicationDate() != null )
-			doc.add(new StringField("year", ""+bibItem.getPublicationDate().toLowerCase(), Store.YES));
-		if ( bibItem.getAbstract() != null)
-			doc.add(new TextField("abstract", bibItem.getAbstract().toLowerCase(), Store.NO));
+		if ( documentParser.getAffiliation() != null )
+			doc.add(new StringField("affiliation", documentParser.getAffiliation().toLowerCase(), Store.YES));
+		if ( documentParser.getDOI() != null )
+			doc.add(new StringField("doi", documentParser.getDOI(), Store.YES));
+		if ( documentParser.getPublicationDate() != null )
+			doc.add(new StringField("year", ""+documentParser.getPublicationDate().toLowerCase(), Store.YES));
+		if ( documentParser.getAbstract() != null)
+			doc.add(new TextField("abstract", documentParser.getAbstract().toLowerCase(), Store.NO));
 
 		// Parse document references
-		List<BibDataSet> refs = grobIDParser.parseReferences(filename);
+		List<Bibliography> refs = documentParser.getReferences();
 
 		// Builds a string if all references to be stored into Index
-		StringBuilder citString = new StringBuilder();
-		for (BibDataSet bib : refs){
-			BiblioItem item = bib.getResBib();
+		
+		for (Bibliography bib : refs){
+			StringBuilder citString = new StringBuilder();
 			// Is is a complete references?
-			if (item.getTitle() != null && item.getAuthors() != null){
-
+			if (bib.getTitle() != null && bib.getAuthors() != null){
 				// Append fields separated by tab (\t)
-				citString.append(item.getTitle().toLowerCase()).append("\t")
-				.append(normalizeAuthors(item.getAuthors()));
+				citString.append(bib.getTitle().toLowerCase()).append("\t")
+				.append(normalizeAuthors(bib.getAuthors()));
 
 				// Has publication data? If so, get just the year.
-				if (item.getPublicationDate() != null)
-					citString.append("\t").append(item.getPublicationDate().toLowerCase());
-				else if (item.getYear() != null)
-					citString.append("\t").append(item.getYear().toLowerCase());
-				// Citation termination mark
-				citString.append("$");
+				if (bib.getPublicationDate() != null)
+					citString.append("\t").append(bib.getPublicationDate().toLowerCase());
+
+				// Adds citation string to the document
+				if (citString.length() > 0)
+					doc.add(new TextField("citString", citString.toString(), Store.YES));
+
+				if (bib.getDOI() != null )
+					doc.add(new StringField("citDOI", bib.getDOI(), Store.YES));
+				else
+					doc.add(new StringField("citDOI", NULL_DOI, Store.YES));
 			}
 		}
-
-		// Adds citation string to the document
-		doc.add(new TextField("citString", citString.toString(), Store.YES));
-
 	}
 
 	/**
@@ -449,7 +466,7 @@ public class PapersIndexer {
 	 * white spaces and  'and' words removed.
 	 */
 	private String normalizeAuthors(String authors) {
-		return authors.replaceAll("\n|;|\\s+and\\s+", ",").toLowerCase();
+		return authors.replaceAll("\n|;|\\s+and\\s+", Utils.AUTHOR_SEPARATOR).toLowerCase();
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -468,10 +485,21 @@ public class PapersIndexer {
 				line = br.readLine();
 			}
 			br.close();
-
+			
 			Configuration configuration = new Configuration(sb.toString());
+			String grobidHome = configuration.getString("grobid.home", "grobid-home");
+			String grobidProperties = configuration.getString("grobid.properties", "grobid-home/config/grobid.properties");
+
+			try {
+				MockContext.setInitialContext(grobidHome, grobidProperties);
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.exit(-1);
+			}
+			GrobidProperties.getInstance();	
+
 			PapersIndexer indexer = new PapersIndexer(configuration, 
-					new PapersIndexSearcher(configuration));
+					new PapersIndexSearcher(configuration), new GrobIDDocumentParser());
 			indexer.addDocuments(args[0]);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
