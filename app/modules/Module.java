@@ -36,7 +36,6 @@ public class Module extends AbstractModule {
 			bind(DocumentParser.class)
 			.annotatedWith(Names.named("documentParser"))
 			.to(bindingClass);
-			System.out.println(bindingClass.getName());
 			
 			if (bindingClass.equals(GrobIDDocumentParser.class))
 				initializeGROBID();
