@@ -76,7 +76,6 @@ public class PapersIndexer {
 	/**
 	 * Document Parser: GROBID or Cermine
 	 */
-	@Named("documentParser")
 	private DocumentParser documentParser;
 
 
@@ -89,7 +88,7 @@ public class PapersIndexer {
 	 */
 	@Inject
 	public PapersIndexer(Configuration configuration, PapersIndexSearcher isearcher, 
-			DocumentParser documentParser) throws IOException {
+			@Named("documentParser") DocumentParser documentParser) throws IOException {
 		this.indexDir = configuration.getString("luceneIndexDir", "db");
 		this.papersIndexSearcher = isearcher;
 		this.documentParser = documentParser;
