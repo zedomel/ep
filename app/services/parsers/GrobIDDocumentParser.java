@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import javax.naming.InitialContext;
+import javax.naming.NamingException;
 
 import org.grobid.core.data.BibDataSet;
 import org.grobid.core.data.BiblioItem;
@@ -49,15 +50,17 @@ public final class GrobIDDocumentParser implements DocumentParser{
 
 	private void initialize() throws Exception {
 		InitialContext ic = new InitialContext();
-		if ( ic.lookup("java:comp/env/" + GrobidPropertyKeys.PROP_GROBID_HOME) == null) {
+		try{
+			ic.lookup("java:comp/env/" + GrobidPropertyKeys.PROP_GROBID_HOME);
+		}catch(NamingException e){
 			Configuration configuration = Configuration.reference();
 			String grobidHome = configuration.getString("grobid.home", "grobid-home");
 			String grobidProperties = configuration.getString("grobid.properties", "grobid-home/config/grobid.properties");
 
 			try {
 				MockContext.setInitialContext(grobidHome, grobidProperties);
-			} catch (Exception e) {
-				throw e;
+			} catch (Exception e1) {
+				throw e1;
 			}
 			GrobidProperties.getInstance();	
 			ENGINE = GrobidFactory.getInstance().createEngine();
