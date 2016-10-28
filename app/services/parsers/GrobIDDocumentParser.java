@@ -4,12 +4,18 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.naming.InitialContext;
+
 import org.grobid.core.data.BibDataSet;
 import org.grobid.core.data.BiblioItem;
 import org.grobid.core.data.Person;
 import org.grobid.core.engines.Engine;
 import org.grobid.core.factory.GrobidFactory;
+import org.grobid.core.mock.MockContext;
+import org.grobid.core.utilities.GrobidProperties;
+import org.grobid.core.utilities.GrobidPropertyKeys;
 
+import play.Configuration;
 import services.Bibliography;
 import services.DocumentParser;
 import services.Utils;
@@ -23,21 +29,41 @@ import services.Utils;
  */
 public final class GrobIDDocumentParser implements DocumentParser{
 
+	private static Engine ENGINE;
+	
 	private final Engine engine;
 
 	private BiblioItem metadata;
 
 	private List<BibDataSet> references;
-	
+
 	/**
 	 * Creates a {@link GrobIDDocumentParser} (singleton)
 	 * @throws Exception if a exception occurs when try to load
 	 * GROBID.
 	 */
-	public GrobIDDocumentParser() {
-		engine = GrobidFactory.getInstance().createEngine();
+	public GrobIDDocumentParser() throws Exception {
+		initialize();
+		engine = ENGINE;
 	}
-	
+
+	private void initialize() throws Exception {
+		InitialContext ic = new InitialContext();
+		if ( ic.lookup("java:comp/env/" + GrobidPropertyKeys.PROP_GROBID_HOME) == null) {
+			Configuration configuration = Configuration.reference();
+			String grobidHome = configuration.getString("grobid.home", "grobid-home");
+			String grobidProperties = configuration.getString("grobid.properties", "grobid-home/config/grobid.properties");
+
+			try {
+				MockContext.setInitialContext(grobidHome, grobidProperties);
+			} catch (Exception e) {
+				throw e;
+			}
+			GrobidProperties.getInstance();	
+			ENGINE = GrobidFactory.getInstance().createEngine();
+		}
+	}
+
 	/**
 	 * Get GROBID engine.
 	 * @return grobid engine
