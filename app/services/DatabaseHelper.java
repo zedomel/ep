@@ -78,61 +78,61 @@ public final class DatabaseHelper {
 	 */
 	public static long addNode(String doi, String title, String authors, String year, String file) throws Exception {
 
-		if (doi == null && (title == null && authors == null && year == null)){
-			throw new Exception("Can't add empty node");
-		}
-		
-		//Clean values
-		doi = doi == null ? "" : doi;
-		title = title == null ? "" : title;
-		authors = authors == null ? "" :  authors;
-		year = year == null ?  "" : year;
-		
-		try (Connection con = getConnection()){
-			con.setAutoCommit(false);
+		if (doi != null || (title != null && authors != null && year != null)){
 
-			// If the new node to create is already in the index
-			// it has a associated file.
-			// If the new node is just a node from a reference of a
-			// node in the index, it does not has a file property.
-			// So, we can differentiate nodes (documents) in the index
-			// from that only in the graph (not already inserted).
-			String queryString;
-			if (file != null)
-				queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}, file: {5}}) RETURN n";
-			else
-				queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}}) RETURN n";
+			//Clean values
+			doi = doi == null ? "" : doi;
+			title = title == null ? "" : title;
+			authors = authors == null ? "" :  authors;
+			year = year == null ?  "" : year;
 
-			try (PreparedStatement stmt = con.prepareStatement(queryString)){
-				stmt.setString(1, doi);
-				stmt.setString(2, title);
-				stmt.setString(3, authors);
-				stmt.setString(4, year);
+			try (Connection con = getConnection()){
+				con.setAutoCommit(false);
+
+				// If the new node to create is already in the index
+				// it has a associated file.
+				// If the new node is just a node from a reference of a
+				// node in the index, it does not has a file property.
+				// So, we can differentiate nodes (documents) in the index
+				// from that only in the graph (not already inserted).
+				String queryString;
 				if (file != null)
-					stmt.setString(5, file);
+					queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}, file: {5}}) RETURN n";
+				else
+					queryString = "MERGE (n:DOCUMENT {doi: {1}, title: {2}, authors: {3}, year: {4}}) RETURN n";
 
-				// Get the new node object and return its internal id
-				ResultSet rs = stmt.executeQuery();
-				if (rs.next()){
-					Map<String, Object> node = (Map<String, Object>) rs.getObject(1);
-					Object id = node.get("_id");
-					if (id != null){
-						// close and commit transaction
-						rs.close();
-						con.commit();
-						return ((Long) id).longValue();
+				try (PreparedStatement stmt = con.prepareStatement(queryString)){
+					stmt.setString(1, doi);
+					stmt.setString(2, title);
+					stmt.setString(3, authors);
+					stmt.setString(4, year);
+					if (file != null)
+						stmt.setString(5, file);
+
+					// Get the new node object and return its internal id
+					ResultSet rs = stmt.executeQuery();
+					if (rs.next()){
+						Map<String, Object> node = (Map<String, Object>) rs.getObject(1);
+						Object id = node.get("_id");
+						if (id != null){
+							// close and commit transaction
+							rs.close();
+							con.commit();
+							return ((Long) id).longValue();
+						}
 					}
-				}
 
-				//Should never happen!
-				throw new Exception("Should neve happen! Query does not return expected value for node");
+					//Should never happen!
+					throw new Exception("Should neve happen! Query does not return expected value for node");
+				}catch (Exception e) {
+					con.rollback();
+					throw e;
+				}
 			}catch (Exception e) {
-				con.rollback();
 				throw e;
 			}
-		}catch (Exception e) {
-			throw e;
 		}
+		throw new Exception("Can't add incomplete node");
 	}
 
 	/**
@@ -155,7 +155,7 @@ public final class DatabaseHelper {
 			con.setAutoCommit(false);
 			//Directional edge from n->m return m (cited node)
 			String queryString = null;
-			
+
 			String param1 = doc.get("doi");
 			String param2 = null;
 			if (param1 != null && !param1.isEmpty()){
@@ -188,7 +188,7 @@ public final class DatabaseHelper {
 
 			if (queryString == null)
 				throw new Exception("Document has no DOI or title. Can't create citation!");
-			
+
 			try (PreparedStatement stmt = con.prepareStatement(queryString)){
 				stmt.setString(1, param1);
 				stmt.setString(2, param2);
@@ -263,6 +263,27 @@ public final class DatabaseHelper {
 			throw e;
 		}
 		return 0;
+	}
+
+	public static long getNumberOfCitations(long id) throws Exception {
+		try (Connection con = getConnection()){
+			con.setAutoCommit(false);
+			String queryString = "MATCH (n:DOCUMENT)<-[r:CITES]-() WHERE ID(n) = {1} RETURN count(r) as total";
+			try (PreparedStatement stmt = con.prepareStatement(queryString)){
+				stmt.setLong(1, id);
+				ResultSet rs = stmt.executeQuery();
+				if (rs.next()){
+					con.commit();
+					return rs.getLong("total");
+				}
+				throw new Exception("Can't find node with id: "+id);
+			}catch (Exception e) {
+				con.rollback();
+				throw e;
+			}
+		}catch (Exception e) {
+			throw e;
+		}
 	}
 
 	/**

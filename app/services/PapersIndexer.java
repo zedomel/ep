@@ -7,6 +7,8 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.inject.Inject;
@@ -19,17 +21,15 @@ import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.spell.LevensteinDistance;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.Bits;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
@@ -37,16 +37,15 @@ import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
 import org.apache.tika.sax.BodyContentHandler;
 import org.grobid.core.mock.MockContext;
-import org.grobid.core.utilities.GrobidProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
-import com.google.inject.name.Named;
-
 import play.Configuration;
+import services.parsers.CermineDocumentParser;
 import services.parsers.GrobIDDocumentParser;
+import services.search.PapersIndexSearcher;
 
 /**
  * Main class for indexing documents (papers) 
@@ -58,6 +57,8 @@ import services.parsers.GrobIDDocumentParser;
 public class PapersIndexer {
 
 	private static final String NULL_DOI = "NULL";
+
+	private static final float MAX_DISTANCE = 0.7f;
 
 	private Logger logger = LoggerFactory.getLogger(PapersIndexer.class);
 
@@ -74,9 +75,9 @@ public class PapersIndexer {
 	private final PapersIndexSearcher papersIndexSearcher;
 
 	/**
-	 * Document Parser: GROBID or Cermine
+	 * Document Parser: GROBID and Cermine
 	 */
-	private DocumentParser documentParser;
+	private DocumentParser documentParsers[];
 
 
 
@@ -84,14 +85,19 @@ public class PapersIndexer {
 	 * Creates a document indexer to index documents from 
 	 * a directory or specific file.
 	 * @param indexDir the directory where index is located (lucene database)
-	 * @throws IOException if an error occurs while initializing index
+	 * @throws Exception 
 	 */
 	@Inject
-	public PapersIndexer(Configuration configuration, PapersIndexSearcher isearcher, 
-			@Named("documentParser") DocumentParser documentParser) throws IOException {
+	public PapersIndexer(Configuration configuration, PapersIndexSearcher isearcher) throws Exception {
 		this.indexDir = configuration.getString("luceneIndexDir", "db");
 		this.papersIndexSearcher = isearcher;
-		this.documentParser = documentParser;
+		initializeParsers();
+	}
+
+	private void initializeParsers() throws Exception {
+		documentParsers = new DocumentParser[2];
+		documentParsers[0] = new GrobIDDocumentParser();
+		documentParsers[1] = new CermineDocumentParser();
 	}
 
 	/**
@@ -129,13 +135,14 @@ public class PapersIndexer {
 		try (final IndexWriter writer = newIndexWriter()) 
 		{
 			File dir = new File(docsDir);
-
+			final List<Document> docs = new ArrayList<>();
 			//Iterates over all documents in the directory
 			Files.list(dir.toPath()).forEach( (path) -> 
 			{
 				try {
 					// Parse document file
 					Document doc = parseDocument(path.toFile());
+					List<Bibliography> references = parseReferences(path.toFile(), doc);
 
 					if (doc != null){
 						// At this point documents have not be inserted into
@@ -155,8 +162,20 @@ public class PapersIndexer {
 						// index when searching and easy recover it from Neo4j.
 						doc.add(new StringField("id", ""+nodeId, Store.YES));
 
+						// Add citation nodes
+						for(Bibliography bib : references){
+							try {
+							long citedNodeId = addCitation(doc, bib);
+							doc.add(new StringField("cite_id", ""+citedNodeId, Store.YES));
+							}catch (Exception e) {
+								logger.error("",e);
+								continue;
+							}
+						}
+
 						// Write document to the index
 						writer.addDocument(doc);
+						docs.add(doc);
 					}
 
 				} catch (Exception e) {
@@ -167,36 +186,9 @@ public class PapersIndexer {
 			// Commit and delete unused files
 			writer.commit();
 			writer.deleteUnusedFiles();
-			// Refresh index reader to changes be searchable
-			papersIndexSearcher.getSearcherManager().maybeRefresh();
 
-			//Now it's time to update citations
+			updateCitations(writer, docs);
 
-			//Acquire a IndexSearch from manager
-			final IndexSearcher isearch = papersIndexSearcher.getSearcherManager().acquire();
-			final IndexReader ireader = isearch.getIndexReader();
-			// Get a bits representing documents in the index 
-			// to trace changes in documents as we iterate over them.
-			Bits liveDoc = MultiFields.getLiveDocs(ireader);
-			// maxDoc() is a large number to ensure iterate 
-			// over all indexed documents.
-			for(int i = 0; i < ireader.maxDoc(); i++){
-				// If document is not live (ready for read) skip it
-				if (liveDoc != null && !liveDoc.get(i))
-					continue;
-
-				// Get document and update its citations
-				Document doc = ireader.document(i);
-				updateCitations(writer, isearch, doc);
-			}
-			// Release IndexSearcher to be used by another thread
-			papersIndexSearcher.getSearcherManager().release(isearch);
-
-			// Now commits updates
-			writer.commit();
-			writer.deleteUnusedFiles();
-			// Refresh index reader to changes be searchable
-			papersIndexSearcher.getSearcherManager().maybeRefresh();
 		}catch(Exception e){
 			throw e;	
 		}
@@ -213,8 +205,9 @@ public class PapersIndexer {
 	{
 		try (final IndexWriter writer = newIndexWriter()) 
 		{
-			IndexSearcher isearch = papersIndexSearcher.getSearcherManager().acquire();
-			Document doc = parseDocument(new File(docPath));
+			File file = new File(docPath);
+			Document doc = parseDocument(file);
+			List<Bibliography> references = parseReferences(file, doc);
 			if (doc != null){
 
 				// Just initialize citCount as 1
@@ -227,18 +220,22 @@ public class PapersIndexer {
 				// And the Neo4j id as a document's field
 				doc.add(new StringField("id", ""+nodeId, Store.YES));
 
-				// Write document to the Index
-				writer.addDocument(doc);		
+				// Add citation nodes
+				if (references != null){
+					for(Bibliography bib : references){
+						long citedNodeId = addCitation(doc, bib);
+						doc.add(new StringField("cite_id", ""+citedNodeId, Store.YES));
+					}
+				}
 
-				// Update references citations
-				updateCitations(writer, isearch, doc);
+				// Write document to the Index
+				writer.addDocument(doc);
 
 				writer.commit();
 				writer.deleteUnusedFiles();
+
+				updateCitations(writer, Arrays.asList(doc));
 			}
-			// Release and refresh IndexSeacher to make changes searchable
-			papersIndexSearcher.getSearcherManager().release(isearch);
-			papersIndexSearcher.getSearcherManager().maybeRefresh();
 		}catch(Exception e){
 			throw e;
 		}
@@ -267,8 +264,7 @@ public class PapersIndexer {
 				// Remove from Neo4j first
 				DatabaseHelper.deleteNode(id);
 
-				// Update citations
-				updateCitations(writer, isearch, isearch.doc(hits[0].doc));
+				updateCitations(writer, Arrays.asList(isearch.doc(hits[0].doc)));
 
 				// Remove from Index
 				writer.deleteDocuments(idTerm);
@@ -291,62 +287,41 @@ public class PapersIndexer {
 	 * Update documents citations by adding nodes and
 	 * edges to Neo4j graph and updating citCount field
 	 * @param doc referenced document to process
+	 * @throws Exception 
 	 */
-	private void updateCitations(IndexWriter writer, IndexSearcher isearch, Document doc) {
-
-		// First, update document citation count
-		Term idTerm = new Term("id", doc.get("id"));
+	private long addCitation(Document doc, Bibliography bib) throws Exception {
 		try {
-			long citCount = DatabaseHelper.getNumberOfCitations(doc) + 1L;
-			writer.updateNumericDocValue(idTerm, "citCount", citCount);
-		}catch(Exception e){
-			logger.error("Error updating citation for document: "+doc.get("file"), e);
+			long citedNodeId = DatabaseHelper.createCitaton(doc, bib.getDOI(), 
+					bib.getTitle(), bib.getAuthors(), bib.getPublicationDate());
+			return citedNodeId;
+		} catch (Exception e) {
+			logger.error("Error adding citation for document: " + doc.get("file"), e);
+			throw e;
 		}
+	}
 
-		// Get citation string extracted from document
-		String[] citStrings = doc.getValues("citString");
-		String[] citDOIs= doc.getValues("citDOI");
-		
-		if (citStrings == null || citStrings.length == 0)
-			return;
-
-		// Iterate over all citation text 
-		for(int i = 0; i < citStrings.length; i++){
-			String[] fields = citStrings[i].split("\t");
-			String doi = citDOIs[i];
-			try {
-
-				// Create citation (edge on Neo4j graph) if not exist
-				if (NULL_DOI.equals(doi))
-					doi = null;
-				String year = null;
-				if (fields.length == 3)
-					year = fields[2];
-				long citedNodeId = DatabaseHelper.createCitaton(doc, doi, fields[0], fields[1], year);
-
-				idTerm = new Term("id", ""+citedNodeId);
-				TermQuery query = new TermQuery(idTerm);
-
-				// Searches for cited document in the Index
-				ScoreDoc[] hits = isearch.search(query, 1).scoreDocs;
-
+	private void updateCitations(IndexWriter writer, List<Document> docs) throws IOException{
+		for(Document doc : docs){
+			String[] citeIds = doc.getValues("cite_id");
+			for(String id : citeIds){
+				Term idTerm = new Term("id", ""+id);
 				// If the document is in the Index update its citCount field
-				if (hits.length > 0){
-					// Get document
-					Document citedDoc = isearch.doc(hits[0].doc);
-					// Add 1 to avoid zero values
-					long citationsCount = DatabaseHelper.getNumberOfCitations(citedDoc) + 1L;
-					// Get document current citation count (lucene)
-					Number docCitCount = doc.getField("citCount").numericValue();
-					// Only updates with citations count have changed or is null
-					if (docCitCount == null || citationsCount > docCitCount.longValue())
-						writer.updateDocValues(idTerm, 
-								new NumericDocValuesField("citCount", citationsCount));
+				// Get document
+				// Add 1 to avoid zero values
+				long citationsCount;
+				try {
+					citationsCount = DatabaseHelper.getNumberOfCitations(Long.parseLong(id)) + 1L;
+				} catch (Exception e) {
+					logger.error("Can't update citations of node id: "+id, e);
+					continue;
 				}
-			} catch (Exception e) {
-				logger.error("Error updating citation for document: "+doc.get("file") + " citString: "+citStrings[i], e);
+				writer.updateDocValues(idTerm, 
+						new NumericDocValuesField("citCount", citationsCount));
 			}
 		}
+
+		writer.commit();
+		writer.deleteUnusedFiles();
 	}
 
 	/**
@@ -394,67 +369,151 @@ public class PapersIndexer {
 		return doc;
 	}
 
+	private List<Bibliography> parseReferences(File docFile, Document doc) {
+
+		List<Bibliography> references = null;
+		try {
+			documentParsers[0].parseReferences(docFile.getAbsolutePath());
+		} catch (Exception e1) {}
+
+		references = documentParsers[0].getReferences(); 
+
+		// Builds a string if all references to be stored into Index
+		boolean completed = true;
+		if (references != null){
+			for(Bibliography bib : references){
+				// Is it complete?
+				if (bib.getTitle() == null || bib.getAuthors() == null || bib.getPublicationDate() == null || 
+						bib.getDOI() == null){
+					completed = false;
+					break;
+				}
+			}
+		}
+
+		if(!completed || references == null){
+			if (references == null) 
+				references = new ArrayList<>();
+			for(int i = 1; i < documentParsers.length; i++){
+				final DocumentParser parser = documentParsers[i];
+				try {
+					parser.parseReferences(docFile.getAbsolutePath());
+				} catch (Exception e) {
+					continue;
+				}
+				for(Bibliography bib : parser.getReferences()){
+					updateBib(references, bib);
+				}
+			}
+		}
+
+		return references.isEmpty() ? null : references;
+
+	}
+
+	private void updateBib(List<Bibliography> references, Bibliography bib) {
+		// Calculate Levenshtein distance between references strings
+		final LevensteinDistance distance = new LevensteinDistance();
+		float maxDist = 0;
+		Bibliography simBib = null;
+		for(Bibliography b : references){
+			float titleDist = 0, authorDist = 0, yearDist = 0;
+			if (b.getTitle() != null && bib.getTitle() != null)
+				titleDist = distance.getDistance(b.getTitle(), bib.getTitle());
+			if (b.getAuthors() != null && bib.getAuthors() != null)
+				authorDist = distance.getDistance(b.getAuthors(), bib.getAuthors());
+			if (b.getPublicationDate() != null && bib.getPublicationDate() != null)
+				yearDist = distance.getDistance(b.getPublicationDate(), bib.getPublicationDate());
+			float dist = (titleDist + authorDist + yearDist) / 3;
+			// If distance is greater than 90% than considers two strings as equal
+			if (dist > maxDist){
+				maxDist = dist;
+				simBib = b;
+			}	
+		}
+
+		if (maxDist > MAX_DISTANCE){
+			if (simBib.getTitle() == null && bib.getTitle() != null)
+				simBib.setTitle(bib.getTitle());
+			if (simBib.getAuthors() == null && bib.getAuthors() != null)
+				simBib.setAuthors(bib.getAuthors());
+			if (simBib.getPublicationDate() == null && bib.getPublicationDate() != null)
+				simBib.setPublicationDate(bib.getPublicationDate());
+			if (simBib.getDOI() == null && bib.getDOI() != null)
+				simBib.setDOI(bib.getDOI());
+		}
+		else{
+			//references.add(bib);
+		}
+	}
+
 	/**
 	 * Process document using GROBID: extracts header and 
 	 * references data.
 	 * @param filename path to the document's file
 	 * @param doc the {@link Document} object to add extracted terms
+	 * @return 
 	 * @throws Exception if any error occurs extracting data.
 	 */
 	private void parseDocument(String filename, Document doc) throws Exception {
 
-		// Parse document
-		documentParser.parse(filename);
+		String title = null, authors = null, affiliation = null, 
+				doi = null, year = null, docAbstract = null, journal = null;
 
-		// If document has not title or authors it can't be add to 
-		// the index: is it really a scientific publication?
-		// TODO: remove authors from mandatory fields
-		if (documentParser.getTitle() == null || documentParser.getAuthors() == null )
+		// Parse document
+		for(int i = 0; i < documentParsers.length; i++){
+			final DocumentParser parser = documentParsers[i];
+			parser.parseHeader(filename);
+
+			if (title == null)
+				title = parser.getTitle();
+
+			if (authors == null)
+				authors = normalizeAuthors(parser.getAuthors());
+
+			if (affiliation == null)
+				affiliation = parser.getAffiliation();
+
+			if (doi == null)
+				doi = parser.getDOI();
+
+			if (year == null)
+				year = parser.getPublicationDate();
+
+			if (docAbstract == null)
+				docAbstract = parser.getAbstract();
+
+			if (journal == null)
+				journal = parser.getJournal();
+		}
+
+		if (title == null || authors == null)
 			throw new Exception("Document has no title or authors");
 
 		// Mandatory fields: title and authors
-		doc.add(new StringField("title", documentParser.getTitle().toLowerCase(), Store.YES));
-
-		//TODO: check for existence
-		doc.add(new StringField("authors", normalizeAuthors(documentParser.getAuthors()), Store.YES));
+		doc.add(new StringField("title", title.toLowerCase(), Store.YES));
+		doc.add(new StringField("authors", authors.toLowerCase(), Store.YES));
 
 		// Some other useful informations
-		if ( documentParser.getAffiliation() != null )
-			doc.add(new StringField("affiliation", documentParser.getAffiliation().toLowerCase(), Store.YES));
-		if ( documentParser.getDOI() != null )
-			doc.add(new StringField("doi", documentParser.getDOI(), Store.YES));
-		if ( documentParser.getPublicationDate() != null )
-			doc.add(new StringField("year", ""+documentParser.getPublicationDate().toLowerCase(), Store.YES));
-		if ( documentParser.getAbstract() != null)
-			doc.add(new TextField("abstract", documentParser.getAbstract().toLowerCase(), Store.NO));
+		if ( affiliation != null )
+			doc.add(new StringField("affiliation", affiliation.toLowerCase(), Store.YES));
+		if ( doi != null )
+			doc.add(new StringField("doi", doi.toLowerCase(), Store.YES));
+		if ( year != null )
+			doc.add(new StringField("year", year.toLowerCase(), Store.YES));
+		if ( journal != null )
+			doc.add(new StringField("journal", journal.toLowerCase(), Store.YES));
+		if ( docAbstract != null)
+			doc.add(new TextField("abstract", docAbstract.toLowerCase(), Store.NO));
+	}
 
-		// Parse document references
-		List<Bibliography> refs = documentParser.getReferences();
-
-		// Builds a string if all references to be stored into Index
-		
-		for (Bibliography bib : refs){
-			StringBuilder citString = new StringBuilder();
-			// Is is a complete references?
-			if (bib.getTitle() != null && bib.getAuthors() != null){
-				// Append fields separated by tab (\t)
-				citString.append(bib.getTitle().toLowerCase()).append("\t")
-				.append(normalizeAuthors(bib.getAuthors()));
-
-				// Has publication data? If so, get just the year.
-				if (bib.getPublicationDate() != null)
-					citString.append("\t").append(bib.getPublicationDate().toLowerCase());
-
-				// Adds citation string to the document
-				if (citString.length() > 0)
-					doc.add(new TextField("citString", citString.toString(), Store.YES));
-
-				if (bib.getDOI() != null )
-					doc.add(new StringField("citDOI", bib.getDOI(), Store.YES));
-				else
-					doc.add(new StringField("citDOI", NULL_DOI, Store.YES));
+	@Override
+	protected void finalize() throws Throwable {
+		super.finalize();
+		for(int i = 0; i < documentParsers.length; i++)
+			if ( documentParsers[i] instanceof GrobIDDocumentParser){
+				MockContext.destroyInitialContext();
 			}
-		}
 	}
 
 	/**
@@ -484,21 +543,11 @@ public class PapersIndexer {
 				line = br.readLine();
 			}
 			br.close();
-			
-			Configuration configuration = new Configuration(sb.toString());
-			String grobidHome = configuration.getString("grobid.home", "grobid-home");
-			String grobidProperties = configuration.getString("grobid.properties", "grobid-home/config/grobid.properties");
 
-			try {
-				MockContext.setInitialContext(grobidHome, grobidProperties);
-			} catch (Exception e) {
-				e.printStackTrace();
-				System.exit(-1);
-			}
-			GrobidProperties.getInstance();	
+			Configuration configuration = new Configuration(sb.toString());
 
 			PapersIndexer indexer = new PapersIndexer(configuration, 
-					new PapersIndexSearcher(configuration), new GrobIDDocumentParser());
+					new PapersIndexSearcher(configuration));
 			indexer.addDocuments(args[0]);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block

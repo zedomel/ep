@@ -26,13 +26,20 @@ public class CermineDocumentParser implements DocumentParser{
 
 	}
 
-	public void parse(String documentFile) throws Exception{
+	@Override
+	public void parseHeader(String documentFile) throws Exception{
 		ContentExtractor extractor = new ContentExtractor();
 		InputStream input = new FileInputStream(documentFile);
 		extractor.setPDF(input);		
 		metadata = extractor.getMetadata();
+	}
+	
+	@Override
+	public void parseReferences(String documentFile) throws Exception {
+		ContentExtractor extractor = new ContentExtractor();
+		InputStream input = new FileInputStream(documentFile);
+		extractor.setPDF(input);		
 		references = extractor.getReferences();
-
 	}
 
 	@Override
@@ -40,8 +47,8 @@ public class CermineDocumentParser implements DocumentParser{
 		StringBuilder sb = new StringBuilder();
 		if (metadata.getAuthors() != null){
 			for (DocumentAuthor author : metadata.getAuthors()){
-				sb.append(author.getName());
-				sb.append(";");
+				sb.append(Utils.sanitize(author.getName()));
+				sb.append(Utils.AUTHOR_SEPARATOR);
 			}
 			sb.replace(sb.length()-1, sb.length(), "");
 			return sb.toString();
@@ -73,22 +80,38 @@ public class CermineDocumentParser implements DocumentParser{
 	@Override
 	public String getPublicationDate() {
 		DocumentDate date = metadata.getDate(DocumentDate.DATE_PUBLISHED);
-		return date.getDay() + "/"+date.getMonth()+ "/"+date.getYear();
+		if (date != null)
+			return date.getDay() + "/"+date.getMonth()+ "/"+date.getYear();
+		return null;
 	}
 
 	@Override
 	public String getAbstract() {
 		return metadata.getAbstrakt();
 	}
+	
+	@Override
+	public String getJournal() {
+		return metadata.getJournal();
+	}
 
 	public List<Bibliography> getReferences(){
 		List<Bibliography> refs = new ArrayList<>(references.size());
 		for(BibEntry entry : references){
 			Bibliography bib = new Bibliography();
-			bib.setTitle(entry.getFirstFieldValue(BibEntry.FIELD_TITLE));
-			bib.setDOI(entry.getFirstFieldValue(BibEntry.FIELD_DOI));
-			bib.setAuthors(Utils.normalizeAuthors(entry.getAllFieldValues(BibEntry.FIELD_AUTHOR)));
-			bib.setPublicationDate(entry.getFirstFieldValue(BibEntry.FIELD_YEAR));
+			String str = entry.getFirstFieldValue(BibEntry.FIELD_TITLE);
+			bib.setTitle(str != null ? str.toLowerCase() : null);
+			
+			str = entry.getFirstFieldValue(BibEntry.FIELD_DOI);
+			bib.setDOI(str != null ? str.toLowerCase() : null);
+			
+			str = Utils.normalizeAuthors(entry.getAllFieldValues(BibEntry.FIELD_AUTHOR));
+			bib.setAuthors(str != null ? str.toLowerCase() : null);
+			
+			str = entry.getFirstFieldValue(BibEntry.FIELD_JOURNAL);
+			bib.setJournal(str != null ? str.toLowerCase() : null);
+			
+			bib.setPublicationDate(Utils.sanitizeYear(entry.getFirstFieldValue(BibEntry.FIELD_YEAR)));
 			refs.add(bib);
 		}
 		return refs;

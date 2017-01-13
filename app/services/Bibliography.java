@@ -9,6 +9,8 @@ public class Bibliography {
 	private String publicationDate;
 	
 	private String DOI;
+
+	private String journal;
 	
 	public Bibliography() {
 		
@@ -44,5 +46,18 @@ public class Bibliography {
 
 	public void setDOI(String dOI) {
 		DOI = dOI;
+	}
+	
+	public String getJournal() {
+		return journal;
+	}
+
+	public void setJournal(String journal) {
+		this.journal = journal;
+	}
+	
+	@Override
+	public String toString() {
+		return String.format("%s %s %s", authors, title, publicationDate);
 	}
 }

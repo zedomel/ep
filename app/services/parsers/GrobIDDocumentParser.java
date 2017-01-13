@@ -78,29 +78,19 @@ public final class GrobIDDocumentParser implements DocumentParser{
 	/**
 	 * Parse document header
 	 * @param filename document filename
-	 * @return a {@link BiblioItem} with 
-	 * extracted header information.
 	 */
-	public BiblioItem parseHeader(String filename) {
-		BiblioItem bibText = new BiblioItem();
-		engine.processHeader(filename, false, bibText);
-		return bibText;
+	@Override
+	public void parseHeader(String filename) {
+		metadata = new BiblioItem();
+		engine.processHeader(filename, false, metadata);
 	}
 
 	/**
 	 * Parse document references.
 	 * @param filename document filename
-	 * @return a {@link List} with {@link BibDataSet} of
-	 * references.
 	 */
-	public List<BibDataSet> parseReferences(String filename) {
-		return engine.processReferences(new File(filename), false);				
-	}
-
 	@Override
-	public void parse(String filename) throws Exception {
-		metadata = new BiblioItem();
-		engine.processHeader(filename, false, metadata);
+	public void parseReferences(String filename) {
 		references = engine.processReferences(new File(filename), false);
 	}
 
@@ -109,11 +99,11 @@ public final class GrobIDDocumentParser implements DocumentParser{
 		if (metadata.getFullAuthors() != null){
 			StringBuilder sb = new StringBuilder();
 			for(Person p : metadata.getFullAuthors()){
-				sb.append(p.getFirstName());
+				sb.append(Utils.sanitize(p.getFirstName()));
 				sb.append(" ");
-				sb.append(p.getMiddleName());
+				sb.append(Utils.sanitize(p.getMiddleName()));
 				sb.append(" ");
-				sb.append(p.getLastName());
+				sb.append(Utils.sanitize(p.getLastName()));
 				sb.append(Utils.AUTHOR_SEPARATOR);
 			}
 			sb.replace(sb.length()-1, sb.length(), "");
@@ -147,6 +137,11 @@ public final class GrobIDDocumentParser implements DocumentParser{
 	public String getAbstract() {
 		return metadata.getAbstract();
 	}
+	
+	@Override
+	public String getJournal() {
+		return metadata.getJournal();
+	}
 
 	@Override
 	public List<Bibliography> getReferences() {
@@ -154,10 +149,13 @@ public final class GrobIDDocumentParser implements DocumentParser{
 		for(BibDataSet bds : references){
 			BiblioItem item = bds.getResBib();
 			Bibliography bib = new Bibliography();
-			bib.setAuthors(item.getAuthors());
-			bib.setTitle(item.getTitle());
-			bib.setDOI(item.getDOI());
-			bib.setPublicationDate( item.getPublicationDate() == null ? item.getYear() : item.getPublicationDate());
+			String str = Utils.normalizePerson(item.getFullAuthors());
+			bib.setAuthors(str != null ? str.toLowerCase() : null);
+			bib.setTitle(item.getTitle() != null ? item.getTitle().toLowerCase() : null);
+			bib.setDOI(item.getDOI() != null ? item.getDOI().toLowerCase() : null);
+			bib.setJournal(item.getJournal() != null ? item.getJournal().toLowerCase() : null);
+			bib.setPublicationDate( Utils.sanitizeYear(item.getPublicationDate() == null ? 
+					item.getYear() : item.getPublicationDate()));
 			refs.add(bib);
 		}
 		return refs;

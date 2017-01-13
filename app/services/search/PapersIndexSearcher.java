@@ -1,10 +1,12 @@
-package services;
+package services.search;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -26,15 +28,21 @@ import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.NIOFSDirectory;
-import org.carrot2.clustering.lingo.LingoClusteringAlgorithm;
 import org.carrot2.core.Controller;
 import org.carrot2.core.ControllerFactory;
 import org.carrot2.core.ProcessingResult;
+import org.carrot2.core.attribute.AttributeNames;
 
 import play.Configuration;
+import services.CitationSimilarity;
+import services.DatabaseHelper;
+import services.clustering.DistanceMeasure;
+import services.clustering.EuclideanDistance;
+import services.clustering.KMedoidClusteringAlgorithm;
+import services.clustering.SearchProcessing;
 
 @Singleton
-public class PapersIndexSearcher {
+public class PapersIndexSearcher implements DocumentSearcher {
 
 
 	private SearcherManager  mgr;
@@ -42,6 +50,10 @@ public class PapersIndexSearcher {
 	private final Directory directory;
 
 	private Controller controller;
+	
+	private int numClusters = 2;
+
+	private DistanceMeasure distanceMeasure = new EuclideanDistance();
 
 	@Inject
 	public PapersIndexSearcher(Configuration configuration) throws IOException {
@@ -68,8 +80,20 @@ public class PapersIndexSearcher {
 		}
 		return mgr;
 	}
+	
+	public String search(String term) throws Exception {
+		return search(term, false, 100);
+	}
 
-	public String search(String term, boolean fetchNumberOfCitations) throws IOException{
+	public String search(String term, int count) throws Exception{
+		return search(term, false, 100);
+	}
+	
+	public String search(String term, boolean fetchNumberOfCitations) throws Exception{
+		return search(term,fetchNumberOfCitations, 100);
+	}
+	
+	public String search(String term, boolean fetchNumberOfCitations, int count) throws Exception{
 		if (term == null || term.isEmpty())
 			return null;
 
@@ -92,7 +116,7 @@ public class PapersIndexSearcher {
 
 		IndexSearcher isearch = getSearcherManager().acquire();
 		try {
-			hits = isearch.search(query,100).scoreDocs;
+			hits = isearch.search(query,count).scoreDocs;
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -107,9 +131,16 @@ public class PapersIndexSearcher {
 			getSearcherManager().release(isearch);
 
 			//Now perform clustering
-			ProcessingResult results = controller.process(docsForClustering, null, LingoClusteringAlgorithm.class);
-
-			// Serialize reusult as JSON
+			Map<String,Object> attributes = new HashMap<>();
+			attributes.put(AttributeNames.DOCUMENTS, docsForClustering);
+			attributes.put(KMedoidClusteringAlgorithm.NUM_CLUSTERS, numClusters);
+			attributes.put(KMedoidClusteringAlgorithm.DISTANCE_MEASURE, distanceMeasure );
+			attributes.put(KMedoidClusteringAlgorithm.MAX_ITERATIONS, 50);
+			attributes.put(SearchProcessing.NUM_NEIGHBORS, 3);
+			
+			ProcessingResult results = controller.process(attributes, SearchProcessing.class);
+			
+			// Serialize result as JSON
 			StringWriter writer = new StringWriter();
 			results.serializeJson(writer);
 

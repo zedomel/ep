@@ -5,7 +5,7 @@ import com.google.inject.name.Names;
 
 import play.Configuration;
 import play.Environment;
-import services.DocumentParser;
+import services.search.DocumentSearcher;
 
 public class Module extends AbstractModule {
 
@@ -21,18 +21,17 @@ public class Module extends AbstractModule {
 
 	protected void configure() {        
 		// Expect configuration like:
-		// documentParser = "services.parsers.GROBIDDocumentParser"
-		// documentParser = "services.parsers.CermineDocumentParser"
-		String bindingClassName = configuration.getString("documentParser");
+		// documentSearcher = services.search.MicrosoftAcademicSearcher
+		// documentSearcher = services.search.PapersIndexSearcher
+		String bindingClassName = configuration.getString("documentSearcher");
 		try {
-			Class<? extends DocumentParser> bindingClass =
+			Class<? extends DocumentSearcher> bindingClass =
 					environment.classLoader().loadClass(bindingClassName)
-					.asSubclass(DocumentParser.class);
+					.asSubclass(DocumentSearcher.class);
 			
-			bind(DocumentParser.class)
-			.annotatedWith(Names.named("documentParser"))
+			bind(DocumentSearcher.class)
+			.annotatedWith(Names.named("docSearcher"))
 			.to(bindingClass);
-			
 			
 		} catch (Exception e) {
 			throw new RuntimeException(e);

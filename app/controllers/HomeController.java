@@ -3,13 +3,13 @@ package controllers;
 import java.io.IOException;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 
-import play.data.FormFactory;
 import play.mvc.Controller;
 import play.mvc.Result;
 import play.routing.JavaScriptReverseRouter;
-import services.PapersIndexSearcher;
 import services.PapersIndexer;
+import services.search.DocumentSearcher;
 import views.html.index;
 
 /**
@@ -21,19 +21,19 @@ public class HomeController extends Controller {
 	/**
 	 * IndexSearcher for documents in database
 	 */
-	private final PapersIndexSearcher isearch;
+	private final DocumentSearcher docSearcher;
 	
 	private final PapersIndexer indexer;
 	
 	/**
 	 * FormFactory injected
 	 */
-	private final FormFactory formFactory;
+//	private final FormFactory formFactory;
 	
 	@Inject
-	public HomeController(PapersIndexSearcher isearch, FormFactory formFactory, PapersIndexer indexer) {
-		this.isearch = isearch;
-		this.formFactory = formFactory;
+	public HomeController(@Named("docSearcher") DocumentSearcher docSearcher, PapersIndexer indexer) {
+		this.docSearcher = docSearcher;
+//		this.formFactory = formFactory;
 		this.indexer = indexer;
 	}
 
@@ -55,8 +55,8 @@ public class HomeController extends Controller {
     public Result search(String term){
     	String jsonResult;
 		try {
-			jsonResult = isearch.search(term, false);
-		} catch (IOException e) {
+			jsonResult = docSearcher.search(term, false, 100);
+		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 			return internalServerError("Can't search for documents");
