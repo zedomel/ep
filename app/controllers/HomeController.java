@@ -1,14 +1,11 @@
 package controllers;
 
-import java.io.IOException;
-
 import javax.inject.Inject;
 import javax.inject.Named;
 
 import play.mvc.Controller;
 import play.mvc.Result;
 import play.routing.JavaScriptReverseRouter;
-import services.PapersIndexer;
 import services.search.DocumentSearcher;
 import views.html.index;
 
@@ -23,7 +20,7 @@ public class HomeController extends Controller {
 	 */
 	private final DocumentSearcher docSearcher;
 	
-	private final PapersIndexer indexer;
+	//private final PapersIndexer indexer;
 	
 	/**
 	 * FormFactory injected
@@ -31,10 +28,10 @@ public class HomeController extends Controller {
 //	private final FormFactory formFactory;
 	
 	@Inject
-	public HomeController(@Named("docSearcher") DocumentSearcher docSearcher, PapersIndexer indexer) {
+	public HomeController(@Named("docSearcher") DocumentSearcher docSearcher) { //, PapersIndexer indexer) {
 		this.docSearcher = docSearcher;
 //		this.formFactory = formFactory;
-		this.indexer = indexer;
+		//this.indexer = indexer;
 	}
 
     /**
@@ -66,12 +63,12 @@ public class HomeController extends Controller {
     
     
     public Result addDocument(String directory){
-    	try {
-			indexer.addDocuments(directory);
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+//    	try {
+//			indexer.addDocuments(directory);
+//		} catch (IOException e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
     	return ok(index.render());
     }
 
